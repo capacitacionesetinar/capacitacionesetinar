@@ -424,6 +424,11 @@ a{color:var(--blue);text-decoration:none}
 .qr-box canvas,.qr-box img{border:8px solid #fff;border-radius:10px;box-shadow:var(--shadow)}
 .link-row{display:flex;gap:8px;align-items:stretch;margin-top:6px}
 .link-row input{flex:1;border:1px solid var(--line);border-radius:10px;padding:10px;font:inherit;font-size:13px;background:var(--paper);color:var(--muted2)}
+.cap-card.open{border-color:var(--gold);box-shadow:0 3px 8px rgba(44,42,40,.07),0 20px 46px rgba(184,121,26,.18)}
+.cap-card.open .cap-top{background:linear-gradient(180deg,var(--gold-soft),rgba(251,246,232,0))}
+.cap-card.open .cap-top .accent{width:6px}
+@keyframes capExpand{from{opacity:0;transform:translateY(-12px)}to{opacity:1;transform:translateY(0)}}
+.cap-card.open .cap-body{display:block;animation:capExpand .34s var(--ease) both}
 </style>
 </head>
 <body>
@@ -543,22 +548,24 @@ function estadoReal(c){
 const ESTADO_TXT={ok:'Ejecutada',late:'Vencida',soon:'Proxima',plan:'Planificada'};
 function chip(e){return '<span class="chip '+e+'"><span class="chip-dot"></span>'+ESTADO_TXT[e]+'</span>';}
 function tipoTag(t){return t==='obligatoria'?'<span class="tag oblig">'+svg('scale')+'Obligatoria</span>':'<span class="tag plani">'+svg('target')+'Planificada</span>';}
+function qrNombre(e){return [e.primer_nombre,e.segundo_nombre,e.primer_apellido,e.segundo_apellido].filter(Boolean).join(' ').replace(/\s+/g,' ').trim();}
+function qrPeople(capId){var seen={},out=[];EVALS.forEach(function(e){if(e.cap_id!==capId)return;var n=qrNombre(e);if(!n)return;var k=n.toLowerCase();if(seen[k])return;seen[k]=1;out.push({nombre:n,rating:e.rating});});return out;}
 function attData(c){
   var rosterC=rosterObra(c.obId);
-  if(c.imp){
-    var nA=c.nReal||0, proj=c.nProj||0;
-    var cobI=proj?Math.min(100,Math.round(nA/proj*100)):(nA?100:0);
-    return {rosterC:[],asistieron:[],faltan:[],extra:[],nAsist:nA,cob:cobI,h:0,f:0,imp:true,proj:proj};
-  }
   var set={};(c.asistieron||[]).forEach(function(x){set[x]=1;});
   var asistieron=rosterC.filter(function(e){return set[e.ced];});
   var faltan=rosterC.filter(function(e){return !set[e.ced];});
   var extra=c.extra||[];
-  var h=0,f=0;
-  asistieron.concat(extra).forEach(function(e){if(e.sexo==='F')f++;else h++;});
-  var nAsist=asistieron.length+extra.length;
-  var cob=rosterC.length?Math.round(asistieron.length/rosterC.length*100):(nAsist?100:0);
-  return {rosterC:rosterC,asistieron:asistieron,faltan:faltan,extra:extra,nAsist:nAsist,cob:cob,h:h,f:f};
+  var qr=qrPeople(c.id);
+  var h=0,f=0;asistieron.concat(extra).forEach(function(e){if(e.sexo==='F')f++;else h++;});
+  var nominal=asistieron.length+extra.length+qr.length;
+  if(c.imp&&nominal===0){
+    var nA=c.nReal||0, proj=c.nProj||0;
+    var cobI=proj?Math.min(100,Math.round(nA/proj*100)):(nA?100:0);
+    return {rosterC:rosterC,asistieron:[],faltan:faltan,extra:[],qr:[],nAsist:nA,cob:cobI,h:0,f:0,imp:true,manual:true,proj:proj};
+  }
+  var cob=rosterC.length?Math.min(100,Math.round(nominal/rosterC.length*100)):(nominal?100:0);
+  return {rosterC:rosterC,asistieron:asistieron,faltan:faltan,extra:extra,qr:qr,nAsist:nominal,cob:cob,h:h,f:f,imp:!!c.imp,manual:false,proj:(c.nProj||0)};
 }
 function kpisScope(caps){
   var total=caps.length, ejec=caps.filter(function(c){return c.estado==='ejecutada';}).length;
@@ -774,33 +781,47 @@ function matSection(c){
   });
   html+='</div>';return html;
 }
+function impTotalsForm(c){
+  return '<div style="display:flex;align-items:flex-end;gap:10px;flex-wrap:wrap;border:1px solid var(--line-soft);background:var(--paper);border-radius:12px;padding:11px 13px;margin:8px 0 2px">'+
+    '<div><label style="font-size:11px;color:var(--muted);display:block;margin-bottom:3px">N.\u00ba de asistentes</label><input id="imp-real-'+c.id+'" type="number" min="0" value="'+(c.nReal!=null?c.nReal:'')+'" style="width:96px;padding:8px;border:1px solid var(--line);border-radius:8px;font:inherit"></div>'+
+    '<div><label style="font-size:11px;color:var(--muted);display:block;margin-bottom:3px">Proyectados</label><input id="imp-proj-'+c.id+'" type="number" min="0" value="'+(c.nProj!=null?c.nProj:'')+'" style="width:96px;padding:8px;border:1px solid var(--line);border-radius:8px;font:inherit"></div>'+
+    '<button class="btn sm dark" data-save-totals="'+c.id+'">'+svg('save','ic')+'Guardar totales</button>'+
+    '<span style="font-size:11px;color:var(--muted);flex:1;min-width:160px">Escribe el n\u00famero de asistentes de esta charla. Si adem\u00e1s marcas personas en la lista o llegan registros por QR, se contar\u00e1n de forma nominal.</span>'+
+  '</div>';
+}
+function qrListBlock(c){
+  var qr=qrPeople(c.id);
+  if(!qr.length)return '<div style="font-size:12px;color:var(--muted);margin:8px 0 2px;display:flex;align-items:center;gap:6px">'+svg('link','ic')+'A\u00fan nadie se registr\u00f3 por el enlace/QR de asistencia.</div>';
+  return '<div style="border:1px solid var(--green-soft);background:#F3FAF5;border-radius:12px;padding:10px 12px;margin:8px 0 2px">'+
+    '<div style="font-weight:600;font-size:12.5px;color:var(--green);margin-bottom:7px;display:flex;align-items:center;gap:6px">'+svg('check','ic')+qr.length+' registrado(s) por QR / enlace</div>'+
+    '<div style="display:flex;flex-wrap:wrap;gap:6px">'+qr.map(function(p){return '<span style="background:#fff;border:1px solid var(--line);border-radius:20px;padding:3px 10px;font-size:12px">'+esc(p.nombre)+'</span>';}).join('')+'</div></div>';
+}
 function attSection(c){
   var a=attData(c);
-  if(a.imp){
-    return '<div class="sec-title">'+svg('users')+'Asistencia</div>'+
-      '<div class="att-summary">'+attSummary(c)+'</div>'+
-      '<div class="legal-note" style="margin-top:8px">Registro importado con totales de asistencia; no incluye la lista nominal individual. Puedes adjuntar el registro de firmas como evidencia.</div>';
-  }
   var ui=attUI[c.id]||(attUI[c.id]={open:false,filter:'all',q:''});
   var html='<div class="sec-title">'+svg('users')+'Asistencia'+
-    '<span style="margin-left:auto;display:flex;gap:7px">'+
-    (a.faltan.length?'<button class="btn sm ghost" data-dl-faltan="'+c.id+'">'+svg('down','ic')+'Faltantes</button>':'')+
+    '<span style="margin-left:auto;display:flex;gap:7px;flex-wrap:wrap">'+
+    (a.faltan&&a.faltan.length?'<button class="btn sm ghost" data-dl-faltan="'+c.id+'">'+svg('down','ic')+'Faltantes</button>':'')+
     '<button class="btn sm ghost" data-att-ext="'+c.id+'">'+svg('plus','ic')+'Externo</button>'+
-    '<button class="btn sm '+(ui.open?'dark':'')+'" data-att-toggle="'+c.id+'">'+(ui.open?'Ocultar':'Ver / editar')+'</button></span></div>';
+    '<button class="btn sm '+(ui.open?'dark':'')+'" data-att-toggle="'+c.id+'">'+(ui.open?'Ocultar lista':'Ver / marcar lista')+'</button></span></div>';
   html+='<div class="att-summary" id="att-sum-'+c.id+'">'+attSummary(c)+'</div>';
+  if(c.imp)html+=impTotalsForm(c);
+  html+=qrListBlock(c);
   html+='<div id="att-body-'+c.id+'">'+(ui.open?attPanel(c):'')+'</div>';
   return html;
 }
 function attSummary(c){
   var a=attData(c);
-  if(a.imp){
+  if(a.manual){
     return '<span class="chip ok"><span class="chip-dot"></span>'+a.nAsist+' asistieron</span>'+
       (a.proj?'<span class="chip plan"><span class="chip-dot"></span>'+a.proj+' proyectados</span>':'')+
       (a.proj?'<span class="chip soon"><span class="chip-dot"></span>'+a.cob+'% cobertura</span>':'');
   }
   return '<span class="chip ok"><span class="chip-dot"></span>'+a.nAsist+' asistieron</span>'+
     (a.rosterC.length?'<span class="chip late"><span class="chip-dot"></span>'+a.faltan.length+' no asistieron</span>':'')+
+    (a.qr&&a.qr.length?'<span class="chip soon"><span class="chip-dot"></span>'+a.qr.length+' por QR</span>':'')+
     (a.rosterC.length?'<span class="chip soon"><span class="chip-dot"></span>'+a.cob+'% cobertura</span>':'')+
+    (c.imp&&c.nReal!=null?'<span class="chip plan"><span class="chip-dot"></span>declarado: '+c.nReal+'</span>':'')+
     '<span class="chip plan"><span class="chip-dot"></span>'+a.h+' H \u00b7 '+a.f+' M</span>';
 }
 function attPanel(c){
@@ -1161,7 +1182,7 @@ function openReport(obId){reportState.obId=obId;
   renderReport();document.getElementById('reportView').classList.add('on');document.body.style.overflow='hidden';}
 function closeReport(){document.getElementById('reportView').classList.remove('on');document.body.style.overflow='';}
 document.addEventListener('click',function(e){
-  var t=e.target.closest('[data-nav],[data-obra],[data-dept],[data-toggle],[data-tipo],[data-edit],[data-exec],[data-unexec],[data-add-cap],[data-save-cap],[data-create-cap],[data-upload],[data-rmfile],[data-mat-file],[data-mat-link],[data-save-matlink],[data-rmmat],[data-att-toggle],[data-att-filter],[data-att-ext],[data-save-ext],[data-rm-ext],[data-dl-faltan],[data-open-obra],[data-open-dept],[data-cal],[data-backup],[data-add-user],[data-edit-user],[data-emp-search],[data-del-cap],[data-close],[data-report],[data-rep-print],[data-rep-close],[data-capacitador],[data-survey-link],[data-copy-link],[data-rate],[data-send-eval]');
+  var t=e.target.closest('[data-nav],[data-obra],[data-dept],[data-toggle],[data-tipo],[data-edit],[data-exec],[data-unexec],[data-add-cap],[data-save-cap],[data-create-cap],[data-upload],[data-rmfile],[data-mat-file],[data-mat-link],[data-save-matlink],[data-rmmat],[data-att-toggle],[data-att-filter],[data-att-ext],[data-save-ext],[data-rm-ext],[data-dl-faltan],[data-open-obra],[data-open-dept],[data-cal],[data-backup],[data-add-user],[data-edit-user],[data-emp-search],[data-del-cap],[data-close],[data-report],[data-rep-print],[data-rep-close],[data-capacitador],[data-survey-link],[data-copy-link],[data-rate],[data-send-eval],[data-save-totals]');
   if(!t)return;
   var d=t.dataset;
   if(d.report){openReport(d.report);return;}
@@ -1203,12 +1224,20 @@ document.addEventListener('click',function(e){
   if(d.copyLink){copyLink(d.copyLink);return;}
   if(d.rate){surveyState.comment=val('evalComment')||surveyState.comment;surveyState.rating=+d.rate;renderSurvey();return;}
   if(d.sendEval){submitEval();return;}
+  if(d.saveTotals){var ct=cap(d.saveTotals);var rv=document.getElementById('imp-real-'+d.saveTotals),pv=document.getElementById('imp-proj-'+d.saveTotals);
+    ct.nReal=(rv&&rv.value!=='')?parseInt(rv.value,10):null;ct.nProj=(pv&&pv.value!=='')?parseInt(pv.value,10):null;
+    markSaved(d.saveTotals);route();reopen(d.saveTotals);toast('Totales de asistencia guardados','check');return;}
   if(d.close){closeModal();return;}
 });
 document.addEventListener('click',function(e){var t=e.target.closest('[data-add-cap]');if(t){addCapModal();}});
 document.addEventListener('input',function(e){
   var el=e.target;
   if(el.dataset&&el.dataset.attSearch){var id=el.dataset.attSearch;attUI[id].q=el.value;document.getElementById('att-list-'+id).innerHTML=attRows(cap(id));}
+  if(el.id==='ev-pn')surveyState.pn=el.value;
+  else if(el.id==='ev-sn')surveyState.sn=el.value;
+  else if(el.id==='ev-pa')surveyState.pa=el.value;
+  else if(el.id==='ev-sa')surveyState.sa=el.value;
+  else if(el.id==='evalComment')surveyState.comment=el.value;
 });
 document.addEventListener('change',function(e){
   var el=e.target;
@@ -1291,7 +1320,7 @@ async function fetchAllCaps(){
   }
   return all;
 }
-async function loadEvals(){ if(!SB)return; try{var res=await SB.from('evaluaciones').select('cap_id,rating,comentario,created_at');if(!res.error)EVALS=res.data||[];}catch(e){console.warn('evals',e);} }
+async function loadEvals(){ if(!SB)return; try{var res=await SB.from('evaluaciones').select('cap_id,rating,comentario,created_at,primer_nombre,segundo_nombre,primer_apellido,segundo_apellido');if(!res.error)EVALS=res.data||[];}catch(e){console.warn('evals',e);} }
 async function loadRemote(){
   if(!SB)return;
   try{
@@ -1434,12 +1463,12 @@ function copyLink(text){var done=function(){toast('Enlace copiado','check');};
   if(navigator.clipboard&&navigator.clipboard.writeText){navigator.clipboard.writeText(text).then(done,function(){fbCopy();done();});}else{fbCopy();done();}}
 function fbCopy(){try{var i=document.getElementById('surveyLinkInput');if(i){i.select();document.execCommand('copy');}}catch(e){}}
 /* ===== Encuesta pública (sin login) ===== */
-var surveyState={capId:null,rating:0,comment:'',sent:false,sending:false};
+var surveyState={capId:null,rating:0,comment:'',pn:'',sn:'',pa:'',sa:'',sent:false,sending:false};
 function handleSurveyRoute(){
   var m=(location.hash||'').match(/^#\/encuesta\/(.+)$/);
   var sv=document.getElementById('surveyView');
   if(!m){sv.style.display='none';sv.innerHTML='';return;}
-  surveyState={capId:decodeURIComponent(m[1]),rating:0,comment:'',sent:false,sending:false};
+  surveyState={capId:decodeURIComponent(m[1]),rating:0,comment:'',pn:'',sn:'',pa:'',sa:'',sent:false,sending:false};
   sv.style.display='block';renderSurvey();
   if(!cap(surveyState.capId)&&window.supabase){if(!SB)initSupabase();if(SB){SB.from('capacitaciones').select('data').eq('id',surveyState.capId).then(function(res){if(res&&res.data&&res.data[0]){if(!cap(surveyState.capId))CAPS.push(res.data[0].data);renderSurvey();}});}}
 }
@@ -1453,6 +1482,13 @@ function renderSurvey(){
   sv.innerHTML='<div class="survey-wrap"><div class="survey-card">'+head+
     '<h1>'+esc(c.nombre)+'</h1>'+
     '<div class="survey-meta">Capacitador: <b>'+esc(c.resp||'\u2014')+'</b><br>'+(o?esc(o.nombre)+' \u00b7 ':'')+fmtFecha(c.fecha)+'</div>'+
+    '<div class="survey-q">Tus datos <span style="font-weight:400;color:var(--muted);font-size:12.5px">(para registrar tu asistencia)</span></div>'+
+    '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:2px">'+
+      '<input id="ev-pn" placeholder="Primer nombre *" value="'+esc(surveyState.pn||'')+'" style="padding:11px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:14px;box-sizing:border-box;width:100%">'+
+      '<input id="ev-sn" placeholder="Segundo nombre" value="'+esc(surveyState.sn||'')+'" style="padding:11px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:14px;box-sizing:border-box;width:100%">'+
+      '<input id="ev-pa" placeholder="Primer apellido *" value="'+esc(surveyState.pa||'')+'" style="padding:11px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:14px;box-sizing:border-box;width:100%">'+
+      '<input id="ev-sa" placeholder="Segundo apellido" value="'+esc(surveyState.sa||'')+'" style="padding:11px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:14px;box-sizing:border-box;width:100%">'+
+    '</div>'+
     '<div class="survey-q">\u00bfC\u00f3mo calificar\u00edas esta capacitaci\u00f3n?</div>'+
     '<div class="big-stars">'+stars+'</div>'+
     '<div class="rate-label">'+(surveyState.rating?labels[surveyState.rating]:'Toca una estrella')+'</div>'+
@@ -1462,11 +1498,17 @@ function renderSurvey(){
   '</div></div>';
 }
 async function submitEval(){
-  if(surveyState.sending||!surveyState.rating)return;
+  if(surveyState.sending)return;
   surveyState.comment=val('evalComment')||surveyState.comment;
+  surveyState.pn=(val('ev-pn')||surveyState.pn||'').trim();
+  surveyState.sn=(val('ev-sn')||surveyState.sn||'').trim();
+  surveyState.pa=(val('ev-pa')||surveyState.pa||'').trim();
+  surveyState.sa=(val('ev-sa')||surveyState.sa||'').trim();
+  if(!surveyState.pn||!surveyState.pa){toast('Escribe al menos tu primer nombre y primer apellido','alert');return;}
+  if(!surveyState.rating){toast('Elige una calificaci\u00f3n de 1 a 5 estrellas','alert');return;}
   surveyState.sending=true;renderSurvey();
   if(!SB&&window.supabase)initSupabase();
-  if(SB){try{var res=await SB.from('evaluaciones').insert({cap_id:surveyState.capId,rating:surveyState.rating,comentario:surveyState.comment||null});if(res.error)throw res.error;
+  if(SB){try{var res=await SB.from('evaluaciones').insert({cap_id:surveyState.capId,rating:surveyState.rating,comentario:surveyState.comment||null,primer_nombre:surveyState.pn,segundo_nombre:surveyState.sn||null,primer_apellido:surveyState.pa,segundo_apellido:surveyState.sa||null});if(res.error)throw res.error;
     surveyState.sent=true;surveyState.sending=false;renderSurvey();return;}
     catch(e){console.warn('eval error',e);surveyState.sending=false;renderSurvey();toast('No se pudo enviar. Revisa tu conexi\u00f3n.','alert');return;}}
   surveyState.sent=true;surveyState.sending=false;renderSurvey();
